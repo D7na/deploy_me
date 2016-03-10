@@ -19,7 +19,7 @@
 
     dbname: '{{ name }}_production'
 
-    dbuser: '{{ name }}'
+    dbuser: '{{ user }}'
 
     dbpassword: '12345678'
 

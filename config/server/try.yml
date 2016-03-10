@@ -19,20 +19,30 @@
 
     dbname: '{{ name }}_production'
 
-    dbuser: '{{ name }}'
+    dbuser: '{{ user }}'
 
     dbpassword: '12345678'
 
   # Список задач, которые будут выполнены последовательно
   tasks:
 
-    # Установка и настройка веб сервера nginx
-    - name: 'nginx | createdir'
-      shell: 'rm /etc/nginx/sites-enabled/default; mkdir -p etc/nginx/sites-enabled/'
+    # Rails setup | копируем .rbenv-vars с нашими переменными
+    - name: 'rails | copy .rbenv-vars'
+      template: 'src=configs/.rbenv-vars dest={{ application }}/shared/.rbenv-vars owner={{ user }} group={{ user }} mode=0644'
 
-    - name: 'nginx | copy config'
-      template: 'src=configs/nginx.conf dest=/etc/nginx/sites-enabled/{{ name }}.conf owner=root group=root mode=0644'
 
-    - name: 'nginx | restart service'
-      # Модуль service - это ещё одна удобная обёртка, указываем какой сервис и что с ним необходимо сделать
-      service: name=nginx state=restarted
+    - name: 'create db user and grant access to database'
+      become: true
+      become_user: postgres
+      postgresql_user: db={{dbname}} name={{dbuser}} password={{dbpassword}} priv=ALL
+
+    - name: 'ensure user does not have unnecessary privilege'
+      become: true
+      become_user: postgres
+      postgresql_user: name={{dbuser}} role_attr_flags=NOSUPERUSER,NOCREATEDB
+
+    - name: 'postgresql | restart service'
+      service: name=postgresql state=restarted
+
+    - name: 'postgresql | copy database.yml'
+      template: 'src=configs/database.yml dest={{ application }}/shared/config/database.yml owner={{ user }} group={{ user }} mode=0644'
