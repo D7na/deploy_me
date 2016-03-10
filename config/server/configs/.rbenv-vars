@@ -1,0 +1,3 @@
+SECRET_KEY_BASE=f3a7424bd0e4841635235a4e9a493d22a4ee26bf1bd8e26b94c9604d5c4b62a8f1aac725ae496159fb6bdbe2730d6ec9d130976527a390f04a5c59ca22723267
+deploy_me_database_user={{ dbuser }}
+deploy_me_database_password={{ dbpassword }}

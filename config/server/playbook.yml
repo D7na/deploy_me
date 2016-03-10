@@ -1,0 +1,149 @@
+---
+- hosts: 'all'
+  remote_user: 'root'
+
+  # В данном блоке объявляются переменные, которые будут использоваться в playbook и конфигах, представленных выше
+  vars:
+    # Версия ruby
+    ruby_version: '2.3.0'
+    # Пользователь, от лица которого будет происходит деплой
+    user: 'deploy'
+    # Домашняя директория
+    home: '/home/{{ user }}'
+    # Директория установки Rbenv
+    rbenv_root: '{{ home }}/.rbenv'
+    # Название приложения
+    name: 'deploy_app'
+    # Путь до нашего приложения
+    application: '{{ home }}/applications/{{ name }}'
+
+    dbname: '{{ name }}_production'
+
+    dbuser: '{{ name }}'
+
+    dbpassword: '12345678'
+
+  # Список задач, которые будут выполнены последовательно
+  tasks:
+    # Обновление кеша и установка необходимых пакетов, всего программного обеспечения,
+    # необходимого для работы нашего сервера
+    - name: 'apt | update'
+      action: 'apt update_cache=yes'
+
+    - name: 'apt | install dependencies'
+      action: 'apt pkg={{ item }}'
+      # with_items - это обычный цикл в Ansible, он возьмёт и прогонит все его элементы через action
+      with_items:
+        - 'build-essential'
+        - 'libssl-dev'
+        - 'libyaml-dev'
+        - 'libreadline6-dev'
+        - 'zlib1g-dev'
+        - 'libcurl4-openssl-dev'
+        - 'git'
+        - 'nginx'
+        - 'redis-server'
+        - 'postgresql'
+        - 'postgresql-contrib'
+        - 'libpq-dev'
+        - 'imagemagick'
+        - 'libmagickwand-dev'
+        - 'nodejs'
+        - 'htop'
+        - 'autoconf'
+        - 'bison'
+        - 'libncurses5-dev'
+        - 'libffi-dev'
+        - 'libgdbm3'
+        - 'libgdbm-dev'
+        - 'python-psycopg2'
+
+
+    - name: 'fix locales'
+      shell: 'locale-gen en_US.UTF-8 && locale-gen ru_RU.UTF-8 && dpkg-reconfigure locales'
+
+    # Создаём нашего пользователя deploy, копируем авторизованный ключ.
+    - name: 'account | create'
+      user: 'name={{ user }} shell=/bin/bash'
+
+    - name: 'account | copy authorized keys'
+      # shell - это модуль Ansible, который позволяет выполнять обычные bash команды
+      shell: 'mkdir -p {{ home }}/.ssh -m 700 && cp /root/.ssh/authorized_keys {{ home }}/.ssh && chown -R {{ user }}:{{ user }} {{ home }}/.ssh'
+
+    # Устанавливаем ruby-build, rbenv, bundler (шаги взяты из инструкции к установке rbenv)
+    - name: 'rbenv | clone repo'
+      git: 'repo=git://github.com/sstephenson/rbenv.git dest={{ rbenv_root }} accept_hostkey=yes'
+
+    - name: 'rbenv | add bin to path'
+      shell: echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> {{ home }}/.bashrc
+
+    - name: 'rbenv | init'
+      shell: echo 'eval "$(rbenv init -)"' >> {{ home }}/.bashrc
+
+    - name: 'rbenv | clone ruby-build repo'
+      git: 'repo=git://github.com/sstephenson/ruby-build.git dest={{ rbenv_root }}/plugins/ruby-build accept_hostkey=yes'
+
+    - name: 'rbenv | clone rbenv-vars repo'
+      git: 'repo=https://github.com/sstephenson/rbenv-vars.git dest={{ rbenv_root }}/plugins/rbenv-vars accept_hostkey=yes'
+
+    - name: 'all | create shared directory'
+      shell: 'mkdir -p {{ application }}/shared/config -m 775 && chown -R {{ user }}:{{ user }} {{ home }}/applications'
+
+    # Rails setup | копируем .rbenv-vars с нашими переменными
+    - name: 'rails | copy .rbenv-vars'
+      template: 'src=configs/.rbenv-vars dest={{ application }}/shared/.rbenv-vars owner={{ user }} group={{ user }} mode=0644'
+
+    - name: 'rbenv | install ruby {{ ruby_version }}'
+      shell: 'RBENV_ROOT={{ rbenv_root }} PATH="$RBENV_ROOT/bin:$PATH" rbenv install {{ ruby_version }}'
+
+    - name: 'rbenv | set global ruby {{ ruby_version }}'
+      shell: 'RBENV_ROOT={{ rbenv_root }} PATH="$RBENV_ROOT/bin:$PATH" rbenv global {{ ruby_version }}'
+
+    - name: 'rbenv | rehash'
+      shell: 'RBENV_ROOT={{ rbenv_root }} PATH="$RBENV_ROOT/bin:$PATH" rbenv rehash'
+
+    - name: 'rbenv | create .gemrc'
+      lineinfile: 'dest={{ home }}/.gemrc owner={{ user }} group={{ user }} mode=0644 line="gem: --no-ri --no-rdoc" create=yes'
+
+    - name: 'ruby | install bundler'
+      shell: 'RBENV_ROOT={{ rbenv_root }} PATH="$RBENV_ROOT/bin:$PATH" rbenv exec gem install bundler'
+
+    - name: 'rbenv | change owner'
+      shell: 'chown -R {{ user }}:{{ user }} {{ rbenv_root }}'
+
+    # Настраиваем postgresql - создаем базу данных, добавляем пользователя и его права
+    - name: 'create database'
+      become: true
+      become_user: postgres
+      postgresql_db: name={{dbname}}
+
+    - name: 'create db user and grant access to database'
+      become: true
+      become_user: postgres
+      postgresql_user: db={{dbname}} name={{dbuser}} password={{dbpassword}} priv=ALL
+
+    - name: 'ensure user does not have unnecessary privilege'
+      become: true
+      become_user: postgres
+      postgresql_user: name={{dbuser}} role_attr_flags=NOSUPERUSER,NOCREATEDB
+
+    - name: 'postgresql | restart service'
+      service: name=postgresql state=restarted
+
+    - name: 'postgresql | copy database.yml'
+      template: 'src=configs/database.yml dest={{ application }}/shared/config/database.yml owner={{ user }} group={{ user }} mode=0644'
+
+    # Rails setup | копируем settings.yml с нашими настройками
+    - name: 'rails | copy settings.yml'
+      copy: 'src=configs/settings.yml dest={{ application }}/shared/config/settings.yml owner={{ user }} group={{ user }} mode=0644'
+
+    # Установка и настройка веб сервера nginx
+    - name: 'nginx | createdir'
+      shell: 'rm /etc/nginx/sites-enabled/default; mkdir -p etc/nginx/sites-enabled/'
+
+    - name: 'nginx | copy config'
+      template: 'src=configs/nginx.conf dest=/etc/nginx/sites-enabled/{{ name }}.conf owner=root group=root mode=0644'
+
+    - name: 'nginx | restart service'
+      # Модуль service - это ещё одна удобная обёртка, указываем какой сервис и что с ним необходимо сделать
+      service: name=nginx state=restarted

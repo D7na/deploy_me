@@ -1,0 +1,38 @@
+---
+- hosts: 'all'
+  remote_user: 'root'
+
+  # В данном блоке объявляются переменные, которые будут использоваться в playbook и конфигах, представленных выше
+  vars:
+    # Версия ruby
+    ruby_version: '2.3.0'
+    # Пользователь, от лица которого будет происходит деплой
+    user: 'deploy'
+    # Домашняя директория
+    home: '/home/{{ user }}'
+    # Директория установки Rbenv
+    rbenv_root: '{{ home }}/.rbenv'
+    # Название приложения
+    name: 'deploy_me'
+    # Путь до нашего приложения
+    application: '{{ home }}/applications/{{ name }}'
+
+    dbname: '{{ name }}_production'
+
+    dbuser: '{{ name }}'
+
+    dbpassword: '12345678'
+
+  # Список задач, которые будут выполнены последовательно
+  tasks:
+
+    # Установка и настройка веб сервера nginx
+    - name: 'nginx | createdir'
+      shell: 'rm /etc/nginx/sites-enabled/default; mkdir -p etc/nginx/sites-enabled/'
+
+    - name: 'nginx | copy config'
+      template: 'src=configs/nginx.conf dest=/etc/nginx/sites-enabled/{{ name }}.conf owner=root group=root mode=0644'
+
+    - name: 'nginx | restart service'
+      # Модуль service - это ещё одна удобная обёртка, указываем какой сервис и что с ним необходимо сделать
+      service: name=nginx state=restarted

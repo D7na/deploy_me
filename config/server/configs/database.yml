@@ -1,0 +1,6 @@
+production:
+  adapter: postgresql
+  username: <%= ENV["deploy_me_database_user"] %>
+  password: <%= ENV["deploy_me_database_password"] %>
+  pool: 8
+  database: {{ dbname }}
